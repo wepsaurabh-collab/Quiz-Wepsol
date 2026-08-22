@@ -36,7 +36,6 @@
 
 <div class="container">
   <div class="header"><h1>WEPSOL</h1><p style="color: #6b7280; font-weight: 500; margin:0;">Online Technical Assessment</p></div>
-  
   <div id="intro-section">
     <div class="instructions">
       <h3 style="margin-top:0;">📝 Instructions:</h3>
@@ -55,7 +54,6 @@
     </div>
     <button class="btn" style="width: 100%; margin-top: 10px;" onclick="startQuiz()">Start Quiz Now</button>
   </div>
-
   <div id="exam-section">
     <div class="status-bar"><span id="question-tracker">Question: 1 / 30</span><span id="timer" style="color:#059669;">⏱ Time Left: 30:00</span><span id="mode-tracker">Mode: Normal</span></div>
     <div class="trackers"><span class="t-pill tp-ans" id="t-ans">Ans: 0</span><span class="t-pill tp-skip" id="t-skip">Skip: 0</span><span class="t-pill tp-pend" id="t-pend">Left: 30</span></div>
@@ -69,7 +67,6 @@
   </div>
 </div>
 
-<!-- MODALS -->
 <div class="modal-overlay" id="loadingModal"><div class="modal-box"><h2 id="loadingText" style="color:#ec4899;">Processing...</h2></div></div>
 <div class="modal-overlay" id="duplicateModal"><div class="modal-box" style="border-top: 8px solid #ef4444;"><h2 style="color: #ef4444;">Access Denied</h2><p>You already submitted this quiz!</p><button class="btn btn-warning" onclick="closeModal('duplicateModal')">Close</button></div></div>
 <div class="modal-overlay" id="selectOptionModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">No Answer Selected</h2><p>Please select an answer.</p><button class="btn btn-warning" onclick="closeModal('selectOptionModal')">Okay</button></div></div>
@@ -79,7 +76,7 @@
 
 <script>
   // YAHAN APNA LINK DAALEIN
-  const GAS_URL = "https://script.google.com/macros/s/AKfycbwWmEUwT51CPWQmhkyo3gquWY25cXIxU3pe_e7LMVRgPAdBfRgaY27-mgqIhR3h3BESTg/exec";
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbw-j0hELQntlIc82lH35dQ3ZuNFH_H2bQi7YZ587AmYwT8jyKNvR5GS0DOtFswOJG-OXg/exec";
   
   function apiCall(action, payload = {}) {
     return new Promise((resolve, reject) => {
@@ -96,6 +93,7 @@
   let quizActive = false, isSubmitting = false, sName = "", sPhone = "", sCity = "";
   let timeLeft = 30 * 60; let timerInterval; let violationCount = 0; let camStream = null;
   let sysConfig = { camEnabled: false, surveyEnabled: false, strictMode: true };
+  let lastSyncHash = ""; // To track if answers changed for live sync
 
   document.addEventListener("DOMContentLoaded", () => {
     apiCall('getQuestions').then(qData => {
@@ -108,6 +106,24 @@
   function updateCounters() {
     let ans = Object.keys(userAnswers).length; let skip = skippedQueue.length; let pend = questions.length - ans;
     document.getElementById("t-ans").innerText = `Ans: ${ans}`; document.getElementById("t-skip").innerText = `Skip: ${skip}`; document.getElementById("t-pend").innerText = `Left: ${pend}`;
+  }
+
+  function getScoreStats() {
+    let s = 0, w = 0, sk = 0;
+    questions.forEach(q => { if (!userAnswers[q.id]) sk++; else if (userAnswers[q.id] === q.ans) s++; else w++; });
+    return { score: s, wrong: w, skipped: sk };
+  }
+
+  // ==== LIVE SYNC FUNCTION ====
+  function triggerLiveSync() {
+    if(!quizActive) return;
+    let currentHash = JSON.stringify(userAnswers);
+    if(currentHash !== lastSyncHash) {
+      lastSyncHash = currentHash;
+      let stats = getScoreStats();
+      let payload = { name: sName, phone: sPhone, city: sCity, score: stats.score, wrong: stats.wrong, skipped: stats.skipped, answers: userAnswers, reason: "🟢 LIVE - IN PROGRESS", totalQuestions: questions.length };
+      apiCall('syncLiveActivity', { payload: payload }).catch(e => console.log(e));
+    }
   }
 
   function startQuiz() {
@@ -132,6 +148,11 @@
     document.getElementById("intro-section").style.display = "none";
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
+    
+    // Initial Live Sync
+    lastSyncHash = ""; triggerLiveSync();
+    // Auto-sync answers every 10 seconds
+    setInterval(triggerLiveSync, 10000);
 
     apiCall('getConfig').then(config => {
       if(config) sysConfig = config;
@@ -214,7 +235,6 @@
     document.addEventListener("visibilitychange", () => { if (document.hidden) triggerViolation(); });
   }
 
-  // STRICT MODE: 3 warnings, submits on 4th attempt (> 3)
   function triggerViolation() {
     if (quizActive && !isSubmitting) {
       violationCount++;
@@ -244,12 +264,11 @@
     document.getElementById("loadingText").innerText = "Submitting securely...";
     document.getElementById("loadingModal").style.display = "flex";
     
-    let score = 0, wrong = 0, skipped = 0;
-    questions.forEach(q => { if (!userAnswers[q.id]) skipped++; else if (userAnswers[q.id] === q.ans) score++; else wrong++; });
-   
-    let payload = { name: sName, phone: sPhone, city: sCity, score: score, wrong: wrong, skipped: skipped, answers: userAnswers, reason: reasonText, totalQuestions: questions.length };
+    let stats = getScoreStats();
+    let payload = { name: sName, phone: sPhone, city: sCity, score: stats.score, wrong: stats.wrong, skipped: stats.skipped, answers: userAnswers, reason: reasonText, totalQuestions: questions.length };
     
-    apiCall('submitQuiz', { payload: payload }).then(() => {
+    // Uses the same endpoint as Live Sync but saves final status
+    apiCall('syncLiveActivity', { payload: payload }).then(() => {
       closeModal("loadingModal");
       document.getElementById("successModal").style.display = "flex";
       if(sysConfig.surveyEnabled) {
