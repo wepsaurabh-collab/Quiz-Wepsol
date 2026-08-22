@@ -78,8 +78,8 @@
 <div class="modal-overlay" id="successModal"><div class="modal-box" style="border-top: 8px solid #10b981; max-width: 500px;"><h2 style="color: #10b981;">Completed!</h2><p>Saved successfully. <span id="autoCloseMsg">Closing...</span></p><div id="surveySection" style="display:none; margin-top:15px; border-top: 1px solid #e5e7eb; padding-top: 15px; text-align: left;"><h4 style="color:#ec4899; margin-top:0; margin-bottom:5px;">📋 Training & Feedback (Optional)</h4><textarea id="surveyText" rows="4" style="width: 100%; border-radius: 6px; padding: 10px; border: 1px solid #d1d5db; box-sizing: border-box; outline: none; font-family: inherit;" placeholder="Enter your details..."></textarea><button class="btn btn-submit" style="width: 100%; margin-top: 10px; float:none;" onclick="sendSurvey()">Submit Feedback & Close</button></div></div></div>
 
 <script>
-  // YAHAN APNA LINK DAALEIN (Quotes ke andar)
-  const GAS_URL = "https://script.google.com/macros/s/AKfycbwP0lg6EltASD_wknF3dtlzVsUW5XWd7Ojesapqol5WIiPNeYFWz0N762xU2ixrF_UMAA/exec";
+  // YAHAN APNA LINK DAALEIN
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbwOuEBfvSJCvWUB43EbGQQ3vMkmcQZv_i0YNOOpiuUylgEeLqlZVaroh8gJeNNcnOhxhw/exec";
   
   function apiCall(action, payload = {}) {
     return new Promise((resolve, reject) => {
@@ -115,7 +115,6 @@
     if (!sName || !sPhone || !sCity) { alert("Please enter Name, Phone, and City"); return; }
     if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
    
-    // Request Fullscreen immediately on click for Mobile Safari/Chrome compatibility
     try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log("FS Blocked", e)); } catch(e){}
 
     document.getElementById("loadingModal").style.display = "flex";
@@ -134,7 +133,6 @@
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
 
-    // Fetch config and setup environment
     apiCall('getConfig').then(config => {
       if(config) sysConfig = config;
       if(sysConfig.camEnabled) startCameraMonitoring();
@@ -147,7 +145,6 @@
     let canvas = document.getElementById('proctorCanvas');
     let context = canvas.getContext('2d');
 
-    // MOBILE FRIENDLY: facingMode user uses front camera on phones natively without failing
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
       .then(function(stream) {
         camStream = stream;
@@ -157,7 +154,7 @@
           canvas.width = video.videoWidth || 320; canvas.height = video.videoHeight || 240;
           context.drawImage(video, 0, 0, canvas.width, canvas.height);
           apiCall('saveSnapshot', { phone: sPhone, base64Image: canvas.toDataURL('image/jpeg', 0.5) }).catch(e=>{});
-        }, 10000);
+        }, 10000); // 10 seconds continuous snap
       })
       .catch(function(err) { console.log("Camera failed/denied. Quiz continues."); });
   }
@@ -217,20 +214,19 @@
     document.addEventListener("visibilitychange", () => { if (document.hidden) triggerViolation(); });
   }
 
-  // UPDATED: Strict Mode Logic (3 Warnings)
+  // STRICT MODE: 3 warnings, submits on 4th attempt (> 3)
   function triggerViolation() {
     if (quizActive && !isSubmitting) {
       violationCount++;
       if (sysConfig.strictMode) {
-        if (violationCount >= 3) {
+        if (violationCount > 3) {
           finalizeQuiz("Cheating: Max Warnings Exceeded");
         } else {
-          document.getElementById("warningMsg").innerHTML = `<b>Warning ${violationCount} of 2:</b> You switched tabs! Next time quiz will Auto-Submit.`;
+          document.getElementById("warningMsg").innerHTML = `<b>Warning ${violationCount} of 3:</b> You switched tabs! Quiz will Auto-Submit after 3 warnings.`;
           document.getElementById("firstWarningModal").style.display = "flex";
         }
       } else {
-        // Strict Mode Disabled = Keep alarming, no auto-submit
-        document.getElementById("warningMsg").innerHTML = `You switched tabs! This activity is tracked.`;
+        document.getElementById("warningMsg").innerHTML = `<b>Alert:</b> You switched tabs! This activity is tracked.`;
         document.getElementById("firstWarningModal").style.display = "flex";
       }
     }
@@ -259,7 +255,7 @@
       if(sysConfig.surveyEnabled) {
          document.getElementById("autoCloseMsg").style.display = "none";
          document.getElementById("surveySection").style.display = "block";
-      } else { setTimeout(() => { window.location.reload(); }, 3500); } // Reload on mobile instead of close
+      } else { setTimeout(() => { window.location.reload(); }, 3500); }
     });
   }
 
