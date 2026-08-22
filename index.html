@@ -161,24 +161,7 @@
     }).catch(e => enableProctoring());
   }
 
-  function startCameraMonitoring() {
-    let video = document.getElementById('proctorVideo');
-    let canvas = document.getElementById('proctorCanvas');
-    let context = canvas.getContext('2d');
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
-      .then(function(stream) {
-        camStream = stream;
-        video.srcObject = stream;
-        setInterval(() => {
-          if(!quizActive) return;
-          canvas.width = video.videoWidth || 320; canvas.height = video.videoHeight || 240;
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          apiCall('saveSnapshot', { phone: sPhone, base64Image: canvas.toDataURL('image/jpeg', 0.5) }).catch(e=>{});
-        }, 10000); // 10 seconds continuous snap
-      })
-      .catch(function(err) { console.log("Camera failed/denied. Quiz continues."); });
-  }
+function startCameraMonitoring() {
 
   function stopCamera() { if(camStream) camStream.getTracks().forEach(track => track.stop()); }
   function startTimer() {
