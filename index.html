@@ -42,17 +42,17 @@
       <h3 style="margin-top:0;">📝 Instructions:</h3>
       <ul style="padding-left: 20px; margin-bottom: 0;">
         <li>You have <b>30 Minutes</b> to complete <b id="totalQCount">30</b> questions.</li>
-        <li><b>Camera Permission</b> is MANDATORY. Please "Allow" when prompted.</li>
+        <li><b>Camera & Location Permissions</b> are MANDATORY. Please "Allow" when prompted.</li>
         <li>Admin tracks your screen activity. Do NOT switch tabs.</li>
       </ul>
     </div>
     <div class="form-group"><label>Participant Name</label><input type="text" id="studentName"></div>
     <div class="form-group"><label>Phone Number</label><input type="text" id="phoneNumber"></div>
     
-    <!-- Auto Fetch Location Field -->
-    <div class="form-group">
+    <!-- Auto Fetch Location Field (Readonly) -->
+    <div class="form-group" style="display:none;" id="locationGroup">
       <label>City / Location 📍</label>
-      <input type="text" id="cityLocation" placeholder="Waiting for location permission to auto-fetch...">
+      <input type="text" id="cityLocation" placeholder="Auto-fetched securely on Login..." readonly style="background:#f3f4f6;">
     </div>
     
     <div class="form-group" style="display: flex; align-items: center;">
@@ -61,6 +61,7 @@
     </div>
     <button class="btn" style="width: 100%; margin-top: 10px;" onclick="startQuiz()">Start Quiz Now</button>
   </div>
+  
   <div id="exam-section">
     <div class="status-bar"><span id="question-tracker">Question: 1 / 30</span><span id="timer" style="color:#059669;">⏱ Time Left: 30:00</span><span id="mode-tracker">Mode: Normal</span></div>
     <div class="trackers"><span class="t-pill tp-ans" id="t-ans">Ans: 0</span><span class="t-pill tp-skip" id="t-skip">Skip: 0</span><span class="t-pill tp-pend" id="t-pend">Left: 30</span></div>
@@ -74,7 +75,8 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="loadingModal"><div class="modal-box"><h2 id="loadingText" style="color:#ec4899;">Checking Access...</h2><p id="loadingSubtext">Please Allow Camera if prompted.</p></div></div>
+<!-- Modals -->
+<div class="modal-overlay" id="loadingModal"><div class="modal-box"><h2 id="loadingText" style="color:#ec4899;">Checking Access...</h2><p id="loadingSubtext">Please Allow permissions if prompted.</p></div></div>
 <div class="modal-overlay" id="duplicateModal"><div class="modal-box" style="border-top: 8px solid #ef4444;"><h2 style="color: #ef4444;">Access Denied</h2><p>You already submitted this quiz!</p><button class="btn btn-warning" onclick="closeModal('duplicateModal')">Close</button></div></div>
 <div class="modal-overlay" id="selectOptionModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">No Answer Selected</h2><p>Please select an answer.</p><button class="btn btn-warning" onclick="closeModal('selectOptionModal')">Okay</button></div></div>
 <div class="modal-overlay" id="confirmSubmitModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">Submit Confirmation</h2><p>You have <b id="pendingCountTxt" style="color:red; font-size:20px;">0</b> questions un-answered.</p><div style="display: flex; justify-content: space-between; margin-top: 20px;"><button class="btn btn-skip" style="width: 48%; margin: 0;" onclick="closeModal('confirmSubmitModal')">Return</button><button class="btn btn-submit" style="width: 48%; margin: 0;" onclick="forceSubmit()">Submit</button></div></div></div>
@@ -103,44 +105,11 @@
   let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Fetch Questions
     apiCall('getQuestions').then(qData => {
       if(qData && qData.length > 0) questions = qData; else questions = fallbackQuestions;
       document.getElementById("totalQCount").innerText = questions.length; document.getElementById("t-pend").innerText = `Left: ${questions.length}`;
     }).catch(e => console.log(e));
-
-    // Auto Fetch Location on page load
-    autoFetchLocation();
   });
-
-  // ==== NEW: AUTO FETCH LOCATION LOGIC ====
-  function autoFetchLocation() {
-    const locInput = document.getElementById("cityLocation");
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          locInput.value = "Detecting city...";
-          const lat = position.coords.latitude;
-          const lon = position.coords.longitude;
-          
-          // Free Fast Reverse Geocoding API
-          fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`)
-            .then(res => res.json())
-            .then(data => {
-              let locationName = data.city || data.locality || data.principalSubdivision || "Unknown";
-              locInput.value = locationName;
-              locInput.readOnly = true;
-              locInput.style.background = "#f3f4f6"; // Grey out field
-            })
-            .catch(e => { locInput.value = `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`; });
-        },
-        (error) => {
-          locInput.placeholder = "Location denied. Please type manually.";
-          locInput.readOnly = false;
-        }
-      );
-    }
-  }
 
   function closeModal(id) { document.getElementById(id).style.display = "none"; }
   function updateCounters() {
@@ -153,7 +122,6 @@
     return { score: s, wrong: w, skipped: sk };
   }
 
-  // ==== LIVE SYNC ====
   function triggerLiveSync() {
     if(!quizActive) return;
     let currentHash = JSON.stringify(userAnswers);
@@ -165,22 +133,66 @@
     }
   }
 
+  // STEP 1: INITIALIZE LOGIN AND FETCH HIGH ACCURACY LOCATION
   function startQuiz() {
-    sName = document.getElementById("studentName").value.trim(); sPhone = document.getElementById("phoneNumber").value.trim(); sCity = document.getElementById("cityLocation").value.trim();
-    if (!sName || !sPhone || !sCity) { alert("Please enter Name, Phone, and City/Location"); return; }
+    sName = document.getElementById("studentName").value.trim(); 
+    sPhone = document.getElementById("phoneNumber").value.trim(); 
+    
+    if (!sName || !sPhone) { alert("Please enter Name and Phone Number"); return; }
     if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
     
     document.getElementById("loadingModal").style.display = "flex";
+    document.getElementById("loadingSubtext").innerText = "Fetching Accurate Location...";
 
-    // STEP 1: FORCE CAMERA BEFORE LOGIN
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          
+          // Using OpenStreetMap API for Highly Accurate Location
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+            .then(res => res.json())
+            .then(data => {
+              let addr = data.address;
+              // Combining localized fields for better precision
+              sCity = [addr.neighbourhood, addr.suburb, addr.city || addr.town, addr.state].filter(Boolean).join(", ");
+              if(!sCity) sCity = data.display_name.substring(0, 60); // Fallback to full string
+              
+              document.getElementById("cityLocation").value = sCity; 
+              proceedToCameraAndLogin();
+            })
+            .catch(e => { 
+              sCity = `Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`; 
+              document.getElementById("cityLocation").value = sCity;
+              proceedToCameraAndLogin(); 
+            });
+        },
+        (error) => {
+          sCity = "Location Denied";
+          document.getElementById("cityLocation").value = sCity;
+          proceedToCameraAndLogin();
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Forces GPS for max accuracy
+      );
+    } else {
+      sCity = "Location Not Supported";
+      document.getElementById("cityLocation").value = sCity;
+      proceedToCameraAndLogin();
+    }
+  }
+
+  // STEP 2: CAMERA AND LOGIN VALIDATION
+  function proceedToCameraAndLogin() {
+    document.getElementById("loadingSubtext").innerText = "Checking Camera Access...";
     let video = document.getElementById('proctorVideo');
+    
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
       .then(function(stream) {
         camStream = stream;
         video.srcObject = stream;
         document.getElementById("loadingSubtext").innerText = "Checking User Data...";
         
-        // STEP 2: CHECK DUPLICATE AFTER CAM SUCCESS
         apiCall('checkDuplicate', { phone: sPhone }).then(isDup => {
           if(isDup) {
             document.getElementById("loadingModal").style.display = "none";
@@ -219,16 +231,10 @@
     }).catch(e => enableProctoring());
   }
 
-  // ON-DEMAND SNAPSHOT FUNCTION (WITH ANDROID FIX)
   function takeAndSendSnapshot() {
     if(!quizActive || !camStream) return;
     let video = document.getElementById('proctorVideo');
-    
-    // ANDROID FIX: Wait until the camera hardware actually starts rendering pixels
-    if(video.videoWidth === 0 || video.videoHeight === 0) {
-       setTimeout(takeAndSendSnapshot, 1000); 
-       return;
-    }
+    if(video.videoWidth === 0 || video.videoHeight === 0) { setTimeout(takeAndSendSnapshot, 1000); return; }
 
     let canvas = document.getElementById('proctorCanvas');
     let context = canvas.getContext('2d');
@@ -297,9 +303,8 @@
     if (quizActive && !isSubmitting) {
       violationCount++;
       if (sysConfig.strictMode) {
-        if (violationCount > 3) {
-          finalizeQuiz("Cheating: Max Warnings Exceeded");
-        } else {
+        if (violationCount > 3) { finalizeQuiz("Cheating: Max Warnings Exceeded"); } 
+        else {
           document.getElementById("warningMsg").innerHTML = `<b>Warning ${violationCount} of 3:</b> You switched tabs! Quiz will Auto-Submit after 3 warnings.`;
           document.getElementById("firstWarningModal").style.display = "flex";
         }
