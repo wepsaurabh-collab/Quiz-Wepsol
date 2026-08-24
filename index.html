@@ -28,6 +28,19 @@
     .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 9999; }
     .modal-box { background: white; padding: 30px; border-radius: 12px; text-align: center; max-width: 450px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); width: 85%; }
     .modal-box h2 { margin-top: 0; }
+    
+    /* NEW: Smooth Loading Animation CSS */
+    .spinner-box { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .loader-spinner {
+      border: 4px solid #fdf2f8;
+      border-top: 4px solid #ec4899;
+      border-radius: 50%;
+      width: 45px;
+      height: 45px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 15px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -76,7 +89,15 @@
 </div>
 
 <!-- Modals -->
-<div class="modal-overlay" id="loadingModal"><div class="modal-box"><h2 id="loadingText" style="color:#ec4899;">Checking Access...</h2><p id="loadingSubtext">Please Allow permissions if prompted.</p></div></div>
+<!-- NEW: Animated Loading Modal -->
+<div class="modal-overlay" id="loadingModal">
+  <div class="modal-box spinner-box">
+    <div class="loader-spinner"></div>
+    <h2 id="loadingText" style="color:#ec4899; margin-top:0;">Processing...</h2>
+    <p id="loadingSubtext" style="color:#4b5563; font-size:14px; margin-bottom:0;">Please Allow permissions if prompted.</p>
+  </div>
+</div>
+
 <div class="modal-overlay" id="duplicateModal"><div class="modal-box" style="border-top: 8px solid #ef4444;"><h2 style="color: #ef4444;">Access Denied</h2><p>You already submitted this quiz!</p><button class="btn btn-warning" onclick="closeModal('duplicateModal')">Close</button></div></div>
 <div class="modal-overlay" id="selectOptionModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">No Answer Selected</h2><p>Please select an answer.</p><button class="btn btn-warning" onclick="closeModal('selectOptionModal')">Okay</button></div></div>
 <div class="modal-overlay" id="confirmSubmitModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">Submit Confirmation</h2><p>You have <b id="pendingCountTxt" style="color:red; font-size:20px;">0</b> questions un-answered.</p><div style="display: flex; justify-content: space-between; margin-top: 20px;"><button class="btn btn-skip" style="width: 48%; margin: 0;" onclick="closeModal('confirmSubmitModal')">Return</button><button class="btn btn-submit" style="width: 48%; margin: 0;" onclick="forceSubmit()">Submit</button></div></div></div>
@@ -105,7 +126,7 @@
   let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Fetch Questions
+    // Fetch Questions silently
     apiCall('getQuestions').then(qData => {
       if(qData && qData.length > 0) questions = qData; else questions = fallbackQuestions;
       document.getElementById("totalQCount").innerText = questions.length; document.getElementById("t-pend").innerText = `Left: ${questions.length}`;
@@ -123,7 +144,6 @@
     return { score: s, wrong: w, skipped: sk };
   }
 
-  // ==== LIVE SYNC ====
   function triggerLiveSync() {
     if(!quizActive) return;
     let currentHash = JSON.stringify(userAnswers);
@@ -135,7 +155,7 @@
     }
   }
 
-  // STEP 1: START BUTTON CLICK -> FETCH LOCATION -> START CAMERA -> LOGIN
+  // STEP 1: START BUTTON CLICK -> MANDATORY LOCATION FETCH -> START CAMERA -> LOGIN
   function startQuiz() {
     sName = document.getElementById("studentName").value.trim(); 
     sPhone = document.getElementById("phoneNumber").value.trim(); 
@@ -144,7 +164,8 @@
     if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
     
     document.getElementById("loadingModal").style.display = "flex";
-    document.getElementById("loadingSubtext").innerText = "Fetching Accurate Location...";
+    document.getElementById("loadingText").innerText = "Connecting...";
+    document.getElementById("loadingSubtext").innerText = "Fetching High-Accuracy Location...";
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -152,7 +173,6 @@
           const lat = position.coords.latitude;
           const lon = position.coords.longitude;
           
-          // Fetches the FULL formatted address including pin code, area, city, and state
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
             .then(res => res.json())
             .then(data => {
@@ -167,16 +187,17 @@
             });
         },
         (error) => {
-          sCity = "Location Denied";
-          document.getElementById("cityLocation").value = sCity;
-          proceedToCameraAndLogin();
+          // STRICT LOCATION RULE: DO NOT PROCEED IF BLOCKED
+          document.getElementById("loadingModal").style.display = "none";
+          alert("🚨 LOCATION BLOCKED!\n\nLocation permission is MANDATORY for this exam.\nPlease click the Lock/Location icon in your browser URL bar, select 'Allow', and try again.");
+          return;
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
       );
     } else {
-      sCity = "Location Not Supported";
-      document.getElementById("cityLocation").value = sCity;
-      proceedToCameraAndLogin();
+      document.getElementById("loadingModal").style.display = "none";
+      alert("Location feature is not supported by your browser. Cannot proceed.");
+      return;
     }
   }
 
@@ -189,7 +210,7 @@
       .then(function(stream) {
         camStream = stream;
         video.srcObject = stream;
-        document.getElementById("loadingSubtext").innerText = "Checking User Data...";
+        document.getElementById("loadingSubtext").innerText = "Authenticating User Data...";
         
         apiCall('checkDuplicate', { phone: sPhone }).then(isDup => {
           if(isDup) {
@@ -197,11 +218,11 @@
             document.getElementById("duplicateModal").style.display = "flex";
             stopCamera();
           } else { beginQuizFlow(); }
-        }).catch(e => { alert("Network connection error."); document.getElementById("loadingModal").style.display = "none"; stopCamera(); });
+        }).catch(e => { alert("Network connection error. Please check your internet."); document.getElementById("loadingModal").style.display = "none"; stopCamera(); });
       })
       .catch(function(err) { 
          document.getElementById("loadingModal").style.display = "none";
-         alert("🚨 CAMERA BLOCKED! Please allow camera from the browser settings to start the test.");
+         alert("🚨 CAMERA BLOCKED!\n\nPlease allow camera access from your browser settings to start the test.");
       });
   }
 
@@ -210,7 +231,6 @@
     document.getElementById("intro-section").style.display = "none";
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
-    
     try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
 
     setTimeout(() => { takeAndSendSnapshot(); }, 2000);
