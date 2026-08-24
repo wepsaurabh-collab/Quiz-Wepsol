@@ -29,7 +29,7 @@
     .modal-box { background: white; padding: 30px; border-radius: 12px; text-align: center; max-width: 450px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); width: 85%; }
     .modal-box h2 { margin-top: 0; }
     
-    /* NEW: Smooth Loading Animation CSS */
+    /* Smooth Loading Animation CSS */
     .spinner-box { display: flex; flex-direction: column; align-items: center; justify-content: center; }
     .loader-spinner {
       border: 4px solid #fdf2f8;
@@ -44,8 +44,8 @@
   </style>
 </head>
 <body>
-<!-- Realtime Feed Source (Fixed for Background Rendering) -->
-<video id="proctorVideo" autoplay muted playsinline style="position: absolute; top: -9999px; left: -9999px; width: 10px; height: 10px; opacity: 0; z-index: -1;"></video>
+<!-- Realtime Feed Source (Fixed for Mobile Fullscreen Rendering) -->
+<video id="proctorVideo" autoplay muted playsinline style="position: fixed; top: 0; left: 0; width: 2px; height: 2px; opacity: 0.01; z-index: -999; pointer-events: none;"></video>
 <canvas id="proctorCanvas" style="display:none;"></canvas>
 
 <div class="container">
@@ -89,7 +89,6 @@
 </div>
 
 <!-- Modals -->
-<!-- NEW: Animated Loading Modal -->
 <div class="modal-overlay" id="loadingModal">
   <div class="modal-box spinner-box">
     <div class="loader-spinner"></div>
@@ -155,7 +154,7 @@
     }
   }
 
-  // STEP 1: START BUTTON CLICK -> MANDATORY LOCATION FETCH -> START CAMERA -> LOGIN
+  // STEP 1: START BUTTON CLICK -> FULLSCREEN TRIGGER -> LOCATION -> CAMERA -> LOGIN
   function startQuiz() {
     sName = document.getElementById("studentName").value.trim(); 
     sPhone = document.getElementById("phoneNumber").value.trim(); 
@@ -163,6 +162,9 @@
     if (!sName || !sPhone) { alert("Please enter Name and Phone Number"); return; }
     if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
     
+    // 🔴 FIX: TRIGGER FULLSCREEN IMMEDIATELY ON BUTTON CLICK
+    try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
+
     document.getElementById("loadingModal").style.display = "flex";
     document.getElementById("loadingText").innerText = "Connecting...";
     document.getElementById("loadingSubtext").innerText = "Fetching High-Accuracy Location...";
@@ -187,7 +189,6 @@
             });
         },
         (error) => {
-          // STRICT LOCATION RULE: DO NOT PROCEED IF BLOCKED
           document.getElementById("loadingModal").style.display = "none";
           alert("🚨 LOCATION BLOCKED!\n\nLocation permission is MANDATORY for this exam.\nPlease click the Lock/Location icon in your browser URL bar, select 'Allow', and try again.");
           return;
@@ -231,7 +232,6 @@
     document.getElementById("intro-section").style.display = "none";
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
-    try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
 
     setTimeout(() => { takeAndSendSnapshot(); }, 2000);
     
