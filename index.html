@@ -31,6 +31,7 @@
   </style>
 </head>
 <body>
+<!-- Realtime Feed Source (Hidden) -->
 <video id="proctorVideo" autoplay muted playsinline style="display:none;"></video>
 <canvas id="proctorCanvas" style="display:none;"></canvas>
 
@@ -41,8 +42,8 @@
       <h3 style="margin-top:0;">📝 Instructions:</h3>
       <ul style="padding-left: 20px; margin-bottom: 0;">
         <li>You have <b>30 Minutes</b> to complete <b id="totalQCount">30</b> questions.</li>
-        <li><b>Do NOT</b> switch tabs or minimize. Admin tracks activity.</li>
-        <li><b>Camera Permission</b> may be required. Please "Allow" if prompted.</li>
+        <li><b>Camera Permission</b> is MANDATORY. Please "Allow" when prompted.</li>
+        <li>Admin tracks your screen activity. Do NOT switch tabs.</li>
       </ul>
     </div>
     <div class="form-group"><label>Participant Name</label><input type="text" id="studentName"></div>
@@ -67,7 +68,7 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="loadingModal"><div class="modal-box"><h2 id="loadingText" style="color:#ec4899;">Processing...</h2></div></div>
+<div class="modal-overlay" id="loadingModal"><div class="modal-box"><h2 id="loadingText" style="color:#ec4899;">Checking Access...</h2><p id="loadingSubtext">Please Allow Camera if prompted.</p></div></div>
 <div class="modal-overlay" id="duplicateModal"><div class="modal-box" style="border-top: 8px solid #ef4444;"><h2 style="color: #ef4444;">Access Denied</h2><p>You already submitted this quiz!</p><button class="btn btn-warning" onclick="closeModal('duplicateModal')">Close</button></div></div>
 <div class="modal-overlay" id="selectOptionModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">No Answer Selected</h2><p>Please select an answer.</p><button class="btn btn-warning" onclick="closeModal('selectOptionModal')">Okay</button></div></div>
 <div class="modal-overlay" id="confirmSubmitModal"><div class="modal-box" style="border-top: 8px solid #3b82f6;"><h2 style="color: #3b82f6;">Submit Confirmation</h2><p>You have <b id="pendingCountTxt" style="color:red; font-size:20px;">0</b> questions un-answered.</p><div style="display: flex; justify-content: space-between; margin-top: 20px;"><button class="btn btn-skip" style="width: 48%; margin: 0;" onclick="closeModal('confirmSubmitModal')">Return</button><button class="btn btn-submit" style="width: 48%; margin: 0;" onclick="forceSubmit()">Submit</button></div></div></div>
@@ -76,12 +77,12 @@
 
 <script>
   // YAHAN APNA LINK DAALEIN
-  const GAS_URL = "https://script.google.com/macros/s/AKfycbzjmDRI3BYBNOlcb4p7Bf-7lTUgPT-1UN7du80wNTyKf0OnNDAPO2p-SRxkI11bD2Vh-w/exec";
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbxL1_d1Oe8RcYPMW5hE8wN_qO_nDQalQ2_oqwe475qTJXAs1qhBCmfvkRiEb3MFmB_Ufw/exec";
   
   function apiCall(action, payload = {}) {
     return new Promise((resolve, reject) => {
       payload.action = action;
-      fetch(GAS_URL, { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
+      fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
       .then(res => res.json())
       .then(res => { if(res.error) reject(res.error); else resolve(res.data); })
       .catch(err => reject(err));
@@ -92,8 +93,8 @@
   let questions = [], currentIdx = 0, skippedQueue = [], isResolvingSkips = false, userAnswers = {};
   let quizActive = false, isSubmitting = false, sName = "", sPhone = "", sCity = "";
   let timeLeft = 30 * 60; let timerInterval; let violationCount = 0; let camStream = null;
-  let sysConfig = { camEnabled: false, surveyEnabled: false, strictMode: true };
-  let lastSyncHash = ""; // To track if answers changed for live sync
+  let sysConfig = { surveyEnabled: false, strictMode: true };
+  let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
     apiCall('getQuestions').then(qData => {
@@ -107,14 +108,13 @@
     let ans = Object.keys(userAnswers).length; let skip = skippedQueue.length; let pend = questions.length - ans;
     document.getElementById("t-ans").innerText = `Ans: ${ans}`; document.getElementById("t-skip").innerText = `Skip: ${skip}`; document.getElementById("t-pend").innerText = `Left: ${pend}`;
   }
-
   function getScoreStats() {
     let s = 0, w = 0, sk = 0;
     questions.forEach(q => { if (!userAnswers[q.id]) sk++; else if (userAnswers[q.id] === q.ans) s++; else w++; });
     return { score: s, wrong: w, skipped: sk };
   }
 
-  // ==== LIVE SYNC FUNCTION ====
+  // ==== LIVE SYNC ====
   function triggerLiveSync() {
     if(!quizActive) return;
     let currentHash = JSON.stringify(userAnswers);
@@ -122,7 +122,7 @@
       lastSyncHash = currentHash;
       let stats = getScoreStats();
       let payload = { name: sName, phone: sPhone, city: sCity, score: stats.score, wrong: stats.wrong, skipped: stats.skipped, answers: userAnswers, reason: "🟢 LIVE - IN PROGRESS", totalQuestions: questions.length };
-      apiCall('syncLiveActivity', { payload: payload }).catch(e => console.log(e));
+      apiCall('syncLiveActivity', { payload: payload }).catch(e => {});
     }
   }
 
@@ -130,38 +130,70 @@
     sName = document.getElementById("studentName").value.trim(); sPhone = document.getElementById("phoneNumber").value.trim(); sCity = document.getElementById("cityLocation").value.trim();
     if (!sName || !sPhone || !sCity) { alert("Please enter Name, Phone, and City"); return; }
     if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
-   
-    try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log("FS Blocked", e)); } catch(e){}
-
+    
     document.getElementById("loadingModal").style.display = "flex";
-    apiCall('checkDuplicate', { phone: sPhone }).then(isDup => {
-      document.getElementById("loadingModal").style.display = "none";
-      if(isDup) document.getElementById("duplicateModal").style.display = "flex";
-      else beginQuizFlow();
-    }).catch(e => {
-       alert("Network connection error. Try again."); 
-       document.getElementById("loadingModal").style.display = "none";
-    });
+
+    // STEP 1: FORCE CAMERA BEFORE LOGIN - Fixes loading blocks
+    let video = document.getElementById('proctorVideo');
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+      .then(function(stream) {
+        camStream = stream;
+        video.srcObject = stream;
+        document.getElementById("loadingSubtext").innerText = "Checking User Data...";
+        
+        // STEP 2: CHECK DUPLICATE AFTER CAM SUCCESS
+        apiCall('checkDuplicate', { phone: sPhone }).then(isDup => {
+          if(isDup) {
+            document.getElementById("loadingModal").style.display = "none";
+            document.getElementById("duplicateModal").style.display = "flex";
+            stopCamera();
+          } else { beginQuizFlow(); }
+        }).catch(e => { alert("Network connection error."); document.getElementById("loadingModal").style.display = "none"; stopCamera(); });
+      })
+      .catch(function(err) { 
+         document.getElementById("loadingModal").style.display = "none";
+         alert("🚨 CAMERA BLOCKED! Please allow camera from the browser settings to start the test.");
+      });
   }
 
   function beginQuizFlow() {
+    document.getElementById("loadingModal").style.display = "none";
     document.getElementById("intro-section").style.display = "none";
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
+    try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
+
+    // Trigger Initial Snapshot after 2 seconds (focus delay)
+    setTimeout(() => { takeAndSendSnapshot(); }, 2000);
     
-    // Initial Live Sync
+    // Auto-sync logic
     lastSyncHash = ""; triggerLiveSync();
-    // Auto-sync answers every 10 seconds
     setInterval(triggerLiveSync, 10000);
+
+    // Listen to Admin's "On Demand" Snapshot signal every 5 seconds
+    setInterval(() => {
+      if(quizActive) {
+        apiCall('checkSnapshotRequest', { phone: sPhone }).then(isReq => { if(isReq) takeAndSendSnapshot(); }).catch(e=>{});
+      }
+    }, 5000);
 
     apiCall('getConfig').then(config => {
       if(config) sysConfig = config;
-      if(sysConfig.camEnabled) startCameraMonitoring();
       enableProctoring();
     }).catch(e => enableProctoring());
   }
 
-function startCameraMonitoring() {
+  // ON-DEMAND SNAPSHOT FUNCTION
+  function takeAndSendSnapshot() {
+    if(!quizActive || !camStream) return;
+    let video = document.getElementById('proctorVideo');
+    let canvas = document.getElementById('proctorCanvas');
+    let context = canvas.getContext('2d');
+    canvas.width = video.videoWidth || 320; 
+    canvas.height = video.videoHeight || 240;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    apiCall('saveSnapshot', { phone: sPhone, base64Image: canvas.toDataURL('image/jpeg', 0.5) }).catch(e=>{});
+  }
 
   function stopCamera() { if(camStream) camStream.getTracks().forEach(track => track.stop()); }
   function startTimer() {
@@ -245,12 +277,12 @@ function startCameraMonitoring() {
     quizActive = false; isSubmitting = true; clearInterval(timerInterval); stopCamera();
     
     document.getElementById("loadingText").innerText = "Submitting securely...";
+    document.getElementById("loadingSubtext").innerText = "";
     document.getElementById("loadingModal").style.display = "flex";
     
     let stats = getScoreStats();
     let payload = { name: sName, phone: sPhone, city: sCity, score: stats.score, wrong: stats.wrong, skipped: stats.skipped, answers: userAnswers, reason: reasonText, totalQuestions: questions.length };
     
-    // Uses the same endpoint as Live Sync but saves final status
     apiCall('syncLiveActivity', { payload: payload }).then(() => {
       closeModal("loadingModal");
       document.getElementById("successModal").style.display = "flex";
