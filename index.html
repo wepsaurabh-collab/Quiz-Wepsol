@@ -48,7 +48,13 @@
     </div>
     <div class="form-group"><label>Participant Name</label><input type="text" id="studentName"></div>
     <div class="form-group"><label>Phone Number</label><input type="text" id="phoneNumber"></div>
-    <div class="form-group"><label>City / Location</label><input type="text" id="cityLocation"></div>
+    
+    <!-- Auto Fetch Location Field -->
+    <div class="form-group">
+      <label>City / Location 📍</label>
+      <input type="text" id="cityLocation" placeholder="Waiting for location permission to auto-fetch...">
+    </div>
+    
     <div class="form-group" style="display: flex; align-items: center;">
       <input type="checkbox" id="agreeRules" style="margin-right: 10px; width: 20px; height: 20px; accent-color:#ec4899;">
       <label for="agreeRules">I agree to the strict rules.</label>
@@ -77,7 +83,7 @@
 
 <script>
   // YAHAN APNA LINK DAALEIN
-  const GAS_URL = "https://script.google.com/macros/s/AKfycbxUzgtN7CmAvceWMlyuKn21PF2am_shc7dJTnayuBBTO8geOlwqmJ-zFjXpnjrySyYX/exec";
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbxKT_BR6U7bZmdp-TRO2-XgOUPiDba6Gv7p33Wqj9nGlrXfCkdW2eIDGC4agwC8ej1Fqw/exec";
   
   function apiCall(action, payload = {}) {
     return new Promise((resolve, reject) => {
@@ -97,11 +103,44 @@
   let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
+    // Fetch Questions
     apiCall('getQuestions').then(qData => {
       if(qData && qData.length > 0) questions = qData; else questions = fallbackQuestions;
       document.getElementById("totalQCount").innerText = questions.length; document.getElementById("t-pend").innerText = `Left: ${questions.length}`;
     }).catch(e => console.log(e));
+
+    // Auto Fetch Location on page load
+    autoFetchLocation();
   });
+
+  // ==== NEW: AUTO FETCH LOCATION LOGIC ====
+  function autoFetchLocation() {
+    const locInput = document.getElementById("cityLocation");
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          locInput.value = "Detecting city...";
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          
+          // Free Fast Reverse Geocoding API
+          fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`)
+            .then(res => res.json())
+            .then(data => {
+              let locationName = data.city || data.locality || data.principalSubdivision || "Unknown";
+              locInput.value = locationName;
+              locInput.readOnly = true;
+              locInput.style.background = "#f3f4f6"; // Grey out field
+            })
+            .catch(e => { locInput.value = `Lat: ${lat.toFixed(2)}, Lon: ${lon.toFixed(2)}`; });
+        },
+        (error) => {
+          locInput.placeholder = "Location denied. Please type manually.";
+          locInput.readOnly = false;
+        }
+      );
+    }
+  }
 
   function closeModal(id) { document.getElementById(id).style.display = "none"; }
   function updateCounters() {
@@ -128,12 +167,12 @@
 
   function startQuiz() {
     sName = document.getElementById("studentName").value.trim(); sPhone = document.getElementById("phoneNumber").value.trim(); sCity = document.getElementById("cityLocation").value.trim();
-    if (!sName || !sPhone || !sCity) { alert("Please enter Name, Phone, and City"); return; }
+    if (!sName || !sPhone || !sCity) { alert("Please enter Name, Phone, and City/Location"); return; }
     if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
     
     document.getElementById("loadingModal").style.display = "flex";
 
-    // STEP 1: FORCE CAMERA BEFORE LOGIN - Fixes loading blocks
+    // STEP 1: FORCE CAMERA BEFORE LOGIN
     let video = document.getElementById('proctorVideo');
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
       .then(function(stream) {
@@ -163,14 +202,11 @@
     quizActive = true; startTimer(); loadQuestion();
     try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
 
-    // Trigger Initial Snapshot after 2 seconds (focus delay)
     setTimeout(() => { takeAndSendSnapshot(); }, 2000);
     
-    // Auto-sync logic
     lastSyncHash = ""; triggerLiveSync();
     setInterval(triggerLiveSync, 10000);
 
-    // Listen to Admin's "On Demand" Snapshot signal every 5 seconds
     setInterval(() => {
       if(quizActive) {
         apiCall('checkSnapshotRequest', { phone: sPhone }).then(isReq => { if(isReq) takeAndSendSnapshot(); }).catch(e=>{});
@@ -183,15 +219,14 @@
     }).catch(e => enableProctoring());
   }
 
-  // ON-DEMAND SNAPSHOT FUNCTION
-// ON-DEMAND SNAPSHOT FUNCTION (WITH ANDROID FIX)
+  // ON-DEMAND SNAPSHOT FUNCTION (WITH ANDROID FIX)
   function takeAndSendSnapshot() {
     if(!quizActive || !camStream) return;
     let video = document.getElementById('proctorVideo');
     
     // ANDROID FIX: Wait until the camera hardware actually starts rendering pixels
     if(video.videoWidth === 0 || video.videoHeight === 0) {
-       setTimeout(takeAndSendSnapshot, 1000); // 1 second baad wapas check karega
+       setTimeout(takeAndSendSnapshot, 1000); 
        return;
     }
 
