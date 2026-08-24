@@ -31,8 +31,8 @@
   </style>
 </head>
 <body>
-<!-- Realtime Feed Source (Hidden) -->
-<video id="proctorVideo" autoplay muted playsinline style="display:none;"></video>
+<!-- Realtime Feed Source (Fixed for Background Rendering) -->
+<video id="proctorVideo" autoplay muted playsinline style="position: absolute; top: -9999px; left: -9999px; width: 10px; height: 10px; opacity: 0; z-index: -1;"></video>
 <canvas id="proctorCanvas" style="display:none;"></canvas>
 
 <div class="container">
@@ -105,6 +105,7 @@
   let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
+    // Fetch Questions
     apiCall('getQuestions').then(qData => {
       if(qData && qData.length > 0) questions = qData; else questions = fallbackQuestions;
       document.getElementById("totalQCount").innerText = questions.length; document.getElementById("t-pend").innerText = `Left: ${questions.length}`;
@@ -122,6 +123,7 @@
     return { score: s, wrong: w, skipped: sk };
   }
 
+  // ==== LIVE SYNC ====
   function triggerLiveSync() {
     if(!quizActive) return;
     let currentHash = JSON.stringify(userAnswers);
@@ -133,7 +135,7 @@
     }
   }
 
-  // STEP 1: INITIALIZE LOGIN AND FETCH HIGH ACCURACY LOCATION
+  // STEP 1: START BUTTON CLICK -> FETCH LOCATION -> START CAMERA -> LOGIN
   function startQuiz() {
     sName = document.getElementById("studentName").value.trim(); 
     sPhone = document.getElementById("phoneNumber").value.trim(); 
@@ -150,15 +152,11 @@
           const lat = position.coords.latitude;
           const lon = position.coords.longitude;
           
-          // Using OpenStreetMap API for Highly Accurate Location
+          // Fetches the FULL formatted address including pin code, area, city, and state
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
             .then(res => res.json())
             .then(data => {
-              let addr = data.address;
-              // Combining localized fields for better precision
-              sCity = [addr.neighbourhood, addr.suburb, addr.city || addr.town, addr.state].filter(Boolean).join(", ");
-              if(!sCity) sCity = data.display_name.substring(0, 60); // Fallback to full string
-              
+              sCity = data.display_name || `Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`; 
               document.getElementById("cityLocation").value = sCity; 
               proceedToCameraAndLogin();
             })
@@ -173,7 +171,7 @@
           document.getElementById("cityLocation").value = sCity;
           proceedToCameraAndLogin();
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Forces GPS for max accuracy
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
       sCity = "Location Not Supported";
@@ -212,6 +210,7 @@
     document.getElementById("intro-section").style.display = "none";
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
+    
     try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
 
     setTimeout(() => { takeAndSendSnapshot(); }, 2000);
