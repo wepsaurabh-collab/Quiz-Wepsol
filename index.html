@@ -38,7 +38,11 @@
   </style>
 </head>
 <body>
-<video id="proctorVideo" autoplay muted playsinline style="position: absolute; top: -9999px; left: -9999px; width: 10px; height: 10px; opacity: 0; z-index: -1; pointer-events: none;"></video>
+
+<!-- BLANK PHOTO FIX: Video element inside a tiny hidden overflow box so browser is forced to render it actively -->
+<div style="overflow: hidden; width: 1px; height: 1px; position: absolute; top: 0; left: 0; opacity: 0.1; pointer-events: none;">
+  <video id="proctorVideo" autoplay muted playsinline></video>
+</div>
 <canvas id="proctorCanvas" style="display:none;"></canvas>
 
 <div class="container">
@@ -85,7 +89,6 @@
   </div>
 </div>
 
-<!-- NEW CUSTOM ALERT MODAL -->
 <div class="modal-overlay" id="customAlertModal">
   <div class="modal-box custom-alert" style="border-top: 8px solid #f59e0b;">
     <h2 style="color: #f59e0b; margin-top:0;">⚠️ Notice</h2>
@@ -122,7 +125,6 @@
   let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Fetch Configuration & Questions in Background
     apiCall('getQuestions').then(qData => {
       if(qData && qData.length > 0) questions = qData; else questions = fallbackQuestions;
       document.getElementById("totalQCount").innerText = questions.length; document.getElementById("t-pend").innerText = `Left: ${questions.length}`;
@@ -165,21 +167,35 @@
     if (!sName || !sPhone) { showAlert("Please enter your Name and Phone Number to begin."); return; }
     if (!document.getElementById("agreeRules").checked) { showAlert("Please agree to the strict rules before starting."); return; }
     
-    try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
-
+    // FULLSCREEN COMPLETELY REMOVED FROM HERE
     document.getElementById("loadingModal").style.display = "flex";
     document.getElementById("loadingSubtext").innerText = "Please wait...";
 
-    // STEP 1: CONDITIONALLY FETCH LOCATION
+    // STEP 1: CONDITIONALLY FETCH LOCATION WITH PINCODE SUPPORT
     if(sysConfig.locationEnabled) {
       document.getElementById("loadingSubtext").innerText = "Requesting Location...";
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
-            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.coords.latitude}&lon=${position.coords.longitude}`)
+            let lat = position.coords.latitude;
+            let lon = position.coords.longitude;
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
               .then(res => res.json())
-              .then(data => { sCity = data.display_name || "Location Detected"; proceedToCameraAndLogin(); })
-              .catch(e => { sCity = "Location Detected"; proceedToCameraAndLogin(); });
+              .then(data => { 
+                let addrStr = "Location Detected";
+                // EXTRACT FULL ADDRESS WITH PINCODE
+                if(data && data.address) {
+                   let ad = data.address;
+                   let parts = [ad.neighbourhood, ad.suburb, ad.village, ad.city || ad.town || ad.county, ad.state, ad.postcode];
+                   // Filter out undefined/empty values and join them
+                   let cleanAddr = parts.filter(Boolean).join(", ");
+                   if(cleanAddr) addrStr = cleanAddr;
+                   else if (data.display_name) addrStr = data.display_name;
+                }
+                sCity = addrStr;
+                proceedToCameraAndLogin(); 
+              })
+              .catch(e => { sCity = `Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`; proceedToCameraAndLogin(); });
           },
           (error) => {
             document.getElementById("loadingModal").style.display = "none";
@@ -204,14 +220,20 @@
         document.getElementById("loadingModal").style.display = "none";
         document.getElementById("duplicateModal").style.display = "flex";
       } else {
-        // STEP 2: CONDITIONALLY FETCH CAMERA
+        // STEP 2: CONDITIONALLY FETCH CAMERA WITH BLANK PHOTO FIX
         if(sysConfig.camEnabled) {
           document.getElementById("loadingSubtext").innerText = "Requesting Camera...";
           navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
             .then(function(stream) {
               camStream = stream;
-              document.getElementById('proctorVideo').srcObject = stream;
-              beginQuizFlow();
+              let video = document.getElementById('proctorVideo');
+              video.srcObject = stream;
+              
+              // Ensure video actually plays even if hidden, fixing the blank frame bug completely
+              video.onloadedmetadata = function(e) {
+                 video.play();
+                 beginQuizFlow();
+              };
             })
             .catch(function(err) { 
                document.getElementById("loadingModal").style.display = "none";
@@ -231,7 +253,7 @@
     quizActive = true; startTimer(); loadQuestion();
 
     if(sysConfig.camEnabled) {
-      setTimeout(() => { takeAndSendSnapshot(); }, 2000);
+      setTimeout(() => { takeAndSendSnapshot(); }, 2500);
       setInterval(() => {
         if(quizActive) {
           apiCall('checkSnapshotRequest', { phone: sPhone }).then(isReq => { if(isReq) takeAndSendSnapshot(); }).catch(e=>{});
@@ -331,7 +353,6 @@
 
   function dismissWarning() { 
     closeModal('firstWarningModal'); 
-    try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e=>console.log(e)); } catch(e){} 
   }
 
   function finalizeQuiz(reasonText) {
